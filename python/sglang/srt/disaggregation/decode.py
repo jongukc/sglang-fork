@@ -538,6 +538,11 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
         full_allocatable_tokens: int,
         swa_allocatable_tokens: Optional[int],
     ) -> bool:
+        if not self.scheduler.enable_hisparse:
+            concrete_tokens = self._radix_full_available()
+            if get_disagg().disaggregation_decode_enable_radix_cache:
+                concrete_tokens += self._radix_full_evictable()
+            full_allocatable_tokens = min(full_allocatable_tokens, concrete_tokens)
         return self.token_to_kv_pool_allocator.prealloc_fits(
             self.tree_cache,
             full_tokens,
@@ -3620,9 +3625,7 @@ class SchedulerDisaggregationDecodeMixin:
         # try to resume retracted requests if there are enough space for another `num_reserved_decode_tokens` decode steps
         resumed_reqs = self.disagg_decode_prealloc_queue.resume_retracted_reqs()
         self.waiting_queue.extend(resumed_reqs)
-        if len(self.disagg_decode_prealloc_queue.retracted_queue) > 0:
-            # if there are still retracted requests, we do not allocate new requests
-            return
+        # Previously reserved transfers must drain even while a request is retracted.
 
         if not hasattr(self, "polling_count"):
             self.polling_count = 0
