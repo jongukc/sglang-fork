@@ -1,8 +1,9 @@
 """HiCache progress must not depend on whether a prefill batch is admitted."""
 
 import unittest
+from contextlib import nullcontext
 from types import SimpleNamespace
-from unittest.mock import Mock, call
+from unittest.mock import Mock, call, patch
 
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import (
@@ -116,6 +117,45 @@ class TestSchedulerHiCacheEvents(unittest.TestCase):
         self.assertEqual(
             self.calls.mock_calls,
             [call.drain(), call.retry(), call.admit(self.running_batch)],
+        )
+
+    def test_pdmux_drains_after_ingest_before_admission(self):
+        s = self.scheduler
+        decode_stream = object()
+        prefill_stream = object()
+        s.stream_groups = [(prefill_stream, decode_stream)]
+        s.sm_counts = [(1, 1)]
+        s.running_batch = self.running_batch
+        s.ingest_requests = self.calls.ingest
+        s._process_hicache_events = self.calls.drain
+        s.update_split_prefill_batch = self.calls.admit
+        s.update_split_prefill_batch.side_effect = StopIteration
+
+        with (
+            patch(
+                "sglang.srt.multiplex.multiplexing_mixin.get_current_stream_idx",
+                return_value=0,
+            ),
+            patch(
+                "sglang.srt.multiplex.multiplexing_mixin.pdmux_prefill_tp_group",
+                side_effect=nullcontext,
+            ),
+            patch(
+                "sglang.srt.multiplex.multiplexing_mixin.torch.cuda.stream",
+                side_effect=lambda _stream: nullcontext(),
+            ),
+            patch("sglang.srt.multiplex.multiplexing_mixin.torch.cuda.empty_cache"),
+            self.assertRaises(StopIteration),
+        ):
+            s.event_loop_pdmux()
+
+        self.assertEqual(
+            self.calls.mock_calls,
+            [
+                call.ingest(),
+                call.drain(),
+                call.admit(1, running_batch=s.running_batch),
+            ],
         )
 
 
