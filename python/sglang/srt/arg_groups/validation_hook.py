@@ -263,6 +263,10 @@ def check_server_args(server_args: Any):
 
     # Check pdmux
     if cfg.enable_pdmux:
+        if cfg.speculative_algorithm is not None:
+            raise ValueError(
+                "PD-Multiplexing does not support speculative decoding."
+            )
         assert cfg.pp_size == 1, (
             "PD-Multiplexing is only supported with pipeline parallelism disabled (pp_size=1)."
         )
